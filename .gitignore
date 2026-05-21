@@ -1,0 +1,9 @@
+node_modules/
+.env
+database/*.db
+database/*.db-wal
+database/*.db-shm
+logs/*.log
+stocks/
+pm2-*.log
+*.tar.gz
