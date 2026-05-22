@@ -40,42 +40,52 @@ detect_os() {
 
 OS=$(detect_os)
 
+IS_TERMUX=false
+if [ -d "/data/data/com.termux/files/usr" ]; then
+  IS_TERMUX=true
+fi
+
 DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 
-MISSING=""
-
-check_cmd() {
-  if command -v "$1" &>/dev/null; then
-    p "  ${GREEN}✓${NC} $1 already installed"
-  else
-    p "  ${RED}✗${NC} $1 not found"
-    MISSING="$MISSING $1"
+# --------------------------------------------------
+# Clean up broken nvm on Termux
+# --------------------------------------------------
+if [ "$IS_TERMUX" = true ]; then
+  if [ -d "$HOME/.nvm" ]; then
+    p "  ${CYAN}→${NC} Removing broken nvm installation (incompatible with Termux)..."
+    rm -rf "$HOME/.nvm"
+    sed -i '/NVM_DIR/d' "$HOME/.bashrc" 2>/dev/null || true
+    sed -i '/nvm.sh/d' "$HOME/.bashrc" 2>/dev/null || true
+    sed -i '/bash_completion/d' "$HOME/.bashrc" 2>/dev/null || true
+    p "  ${GREEN}✓${NC} Cleaned"
   fi
-}
+fi
 
-check_cmd git
-check_cmd curl
-
-FORCE_NODE20=false
-if command -v node &>/dev/null; then
-  NODE_FULL=$(node -v)
-  NODE_MAJOR=$(echo "$NODE_FULL" | sed 's/v//' | cut -d. -f1)
+# --------------------------------------------------
+# Install Node.js & prerequisites per platform
+# --------------------------------------------------
+if [ "$IS_TERMUX" = true ]; then
+  p "  ${CYAN}→${NC} Installing packages via pkg..."
+  pkg update -y
+  pkg install -y nodejs-lts git curl
+  p "  ${GREEN}✓${NC} Node.js $(node -v) installed"
+elif command -v node &>/dev/null; then
+  NODE_MAJOR=$(node -v | sed 's/v//' | cut -d. -f1)
   if [ "$NODE_MAJOR" = "20" ]; then
-    p "  ${GREEN}✓${NC} Node.js $NODE_FULL detected"
+    p "  ${GREEN}✓${NC} Node.js $(node -v) detected"
   else
-    p "  ${YELLOW}⚠ Node.js $NODE_FULL detected — forcing Node.js 20${NC}"
-    FORCE_NODE20=true
+    p "  ${YELLOW}⚠ Node.js $(node -v) detected — installing Node.js 20 via nvm${NC}"
+    export NVM_DIR="$HOME/.nvm"
+    if [ ! -d "$NVM_DIR" ]; then
+      curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+    fi
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+    nvm install 20
+    nvm use 20
+    nvm alias default 20
+    p "  ${GREEN}✓${NC} Node.js $(node -v) active"
   fi
 else
-  FORCE_NODE20=true
-fi
-
-if command -v npm &>/dev/null; then
-  p "  ${GREEN}✓${NC} npm $(npm -v) already installed"
-fi
-
-if [ "$FORCE_NODE20" = true ]; then
-  p ""
   p "  ${CYAN}→${NC} Installing Node.js 20 via nvm..."
   export NVM_DIR="$HOME/.nvm"
   if [ ! -d "$NVM_DIR" ]; then
@@ -85,24 +95,26 @@ if [ "$FORCE_NODE20" = true ]; then
   nvm install 20
   nvm use 20
   nvm alias default 20
-  p "  ${GREEN}✓${NC} Node.js $(node -v) active"
+  p "  ${GREEN}✓${NC} Node.js $(node -v) installed"
 fi
 
-if [ -n "$MISSING" ]; then
-  p ""
-  p "  ${CYAN}→${NC} Installing missing packages..."
-  case "$OS" in
-    debian)
-      sudo apt-get update && sudo apt-get install -y $MISSING
-      ;;
-    termux)
-      pkg update && pkg install -y $MISSING
-      ;;
-    *)
-      p "  ${YELLOW}⚠ Please install missing packages manually: $MISSING${NC}"
-      ;;
-  esac
-  p "  ${GREEN}✓${NC} Missing packages installed"
+if command -v npm &>/dev/null; then
+  p "  ${GREEN}✓${NC} npm $(npm -v) already installed"
+fi
+
+# Install git/curl if missing (non-Termux)
+if [ "$IS_TERMUX" = false ]; then
+  MISSING=""
+  command -v git &>/dev/null || MISSING="$MISSING git"
+  command -v curl &>/dev/null || MISSING="$MISSING curl"
+  if [ -n "$MISSING" ]; then
+    p "  ${CYAN}→${NC} Installing missing packages:$MISSING"
+    case "$OS" in
+      debian) sudo apt-get update && sudo apt-get install -y $MISSING ;;
+      *) p "  ${YELLOW}⚠ Please install manually:$MISSING${NC}" ;;
+    esac
+    p "  ${GREEN}✓${NC} Packages installed"
+  fi
 fi
 
 p "  ${GREEN}✓${NC} Prerequisites ready"

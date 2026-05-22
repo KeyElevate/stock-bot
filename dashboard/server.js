@@ -93,8 +93,8 @@ app.get('/auth/check', (req, res) => {
   res.status(401).json({ authenticated: false });
 });
 
-// API routes
-app.use('/api', apiRoutes);
+// API routes (protected by authentication)
+app.use('/api', isAuthenticated, apiRoutes);
 
 // Serve React app for all other routes (SPA fallback)
 app.get('*', (req, res) => {
