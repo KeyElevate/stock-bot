@@ -299,6 +299,77 @@ function generateStockFileName() {
   return `stock_${Date.now()}.txt`;
 }
 
+/**
+ * Normalizes a URL/domain into a clean service name
+ * Handles: https://discord.com, www.xbox.com, discord.com, keyelevate.store
+ */
+function normalizeService(url) {
+  return url
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split(':')[0]
+    .replace(/\.(com|net|org|store|io|gg)$/i, '');
+}
+
+/**
+ * Scans all flat stock files and groups lines by detected service
+ * @returns {Object} - { serviceName: [line1, line2, ...], ... }
+ */
+function extractServicesFromFlatFiles() {
+  const files = getAllStockFiles();
+  const serviceMap = {};
+
+  for (const filePath of files) {
+    const stocks = parseStockFile(filePath);
+    for (const stock of stocks) {
+      const service = normalizeService(stock.url);
+      if (service && service.length > 0) {
+        if (!serviceMap[service]) serviceMap[service] = [];
+        if (!serviceMap[service].includes(stock.original)) {
+          serviceMap[service].push(stock.original);
+        }
+      }
+    }
+  }
+
+  return serviceMap;
+}
+
+/**
+ * Imports stock lines into a service directory (deduplicated)
+ * @param {string} service - Service name
+ * @param {Array} lines - Array of raw stock lines
+ * @returns {Object} - { imported: number, skipped: number }
+ */
+function importServiceLines(service, lines) {
+  const serviceDir = path.join(config.stock.directory, service.toLowerCase());
+  ensureDirectory(serviceDir);
+
+  let imported = 0;
+  let skipped = 0;
+
+  const fileNumber = getNextStockFileNumber(service);
+  const filePath = path.join(serviceDir, `stock_${fileNumber}.txt`);
+  const outputLines = [];
+
+  for (const line of lines) {
+    if (isStockDuplicate(service, line)) {
+      skipped++;
+    } else {
+      outputLines.push(line);
+      imported++;
+    }
+  }
+
+  if (outputLines.length > 0) {
+    fs.writeFileSync(filePath, outputLines.join('\n') + '\n', 'utf-8');
+  }
+
+  return { imported, skipped };
+}
+
 module.exports = {
   validateStockLine,
   parseStockFile,
@@ -311,6 +382,9 @@ module.exports = {
   searchStockInFiles,
   getAllStockFiles,
   generateStockFileName,
+  normalizeService,
+  extractServicesFromFlatFiles,
+  importServiceLines,
   ensureDirectory,
   parseDuration,
   formatTimestamp,
