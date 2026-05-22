@@ -4,6 +4,8 @@ const config = require('./config');
 
 /**
  * Validates a stock line format: url:email:password
+ * Handles colons in URLs (e.g. https://) and passwords.
+ * Uses the @ sign in the email as the anchor delimiter.
  * @param {string} line - The stock line to validate
  * @returns {object|null} - Parsed stock object or null if invalid
  */
@@ -14,11 +16,21 @@ function validateStockLine(line) {
   if (!trimmed || trimmed.startsWith('#')) return null;
 
   const parts = trimmed.split(':');
-  if (parts.length < 3) return null;
 
-  const url = parts[0].trim();
-  const email = parts[1].trim();
-  const password = parts.slice(2).join(':').trim();
+  // Find the email part (must contain @)
+  let emailIdx = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].includes('@')) {
+      emailIdx = i;
+      break;
+    }
+  }
+
+  if (emailIdx === -1) return null;
+
+  const url = parts.slice(0, emailIdx).join(':').trim();
+  const email = parts[emailIdx].trim();
+  const password = parts.slice(emailIdx + 1).join(':').trim();
 
   if (!url || !email || !password) return null;
 
@@ -219,6 +231,74 @@ function maskEmail(email) {
   return `${maskedLocal}@${domain}`;
 }
 
+/**
+ * Returns all .txt stock files in the root stocks directory (flat structure)
+ */
+function getAllStockFiles() {
+  if (!fs.existsSync(config.stock.directory)) return [];
+  return fs
+    .readdirSync(config.stock.directory)
+    .filter((f) => f.endsWith('.txt'))
+    .map((f) => path.join(config.stock.directory, f));
+}
+
+/**
+ * Searches all stock files for entries where the URL contains the given term
+ * @param {string} term - Search term (e.g., 'xbox')
+ * @returns {Array} - Array of { url, email, password, original, filePath }
+ */
+function searchStockInFiles(term) {
+  const searchTerm = term.toLowerCase();
+  const files = getAllStockFiles();
+  const results = [];
+
+  for (const filePath of files) {
+    const stocks = parseStockFile(filePath);
+    for (const stock of stocks) {
+      if (stock.url.toLowerCase().includes(searchTerm)) {
+        results.push({ ...stock, filePath });
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Removes a specific stock line from whichever .txt file contains it (flat structure)
+ * @param {string} line - The exact stock line to remove
+ * @returns {boolean} - True if removed
+ */
+function removeStockLineByContent(line) {
+  const files = getAllStockFiles();
+  for (const filePath of files) {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const lines = content.split('\n');
+    const filteredLines = lines.filter((l) => l.trim() !== line.trim());
+
+    if (filteredLines.length !== lines.length) {
+      while (filteredLines.length > 0 && filteredLines[filteredLines.length - 1].trim() === '') {
+        filteredLines.pop();
+      }
+      if (filteredLines.length === 0) {
+        fs.unlinkSync(filePath);
+      } else {
+        fs.writeFileSync(filePath, filteredLines.join('\n') + '\n', 'utf-8');
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Generates a unique stock filename using a timestamp
+ * @returns {string} - Filename like stock_1712345678.txt
+ */
+function generateStockFileName() {
+  return `stock_${Date.now()}.txt`;
+}
+
 module.exports = {
   validateStockLine,
   parseStockFile,
@@ -227,6 +307,10 @@ module.exports = {
   getStockServices,
   isStockDuplicate,
   removeStockLine,
+  removeStockLineByContent,
+  searchStockInFiles,
+  getAllStockFiles,
+  generateStockFileName,
   ensureDirectory,
   parseDuration,
   formatTimestamp,

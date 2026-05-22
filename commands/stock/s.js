@@ -1,39 +1,34 @@
 const { SlashCommandBuilder } = require('discord.js');
-const { errorEmbed, stockEmbed, warningEmbed } = require('../../utils/embeds');
+const { errorEmbed, stockEmbed, successEmbed, warningEmbed } = require('../../utils/embeds');
 const { logger, stockLogger } = require('../../utils/logger');
 const { statements, ensureUser } = require('../../database');
-const { getStockCount, removeStockLine, parseStockFile, maskEmail, formatTimestamp } = require('../../utils/helpers');
+const { searchStockInFiles, removeStockLineByContent, maskEmail, formatTimestamp } = require('../../utils/helpers');
 const config = require('../../utils/config');
-const path = require('path');
-const fs = require('fs');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('s')
-    .setDescription('Request stock from a predefined service')
+    .setDescription('Request stock by searching all files for a URL match')
     .addStringOption((option) =>
       option
         .setName('service')
-        .setDescription('The service to get stock from')
+        .setDescription('Search term (e.g., xbox, netflix, gmail)')
         .setRequired(true)
-        .addChoices(
-          { name: 'Microsoft', value: 'microsoft' },
-          { name: 'Xbox', value: 'xbox' },
-          { name: 'Minecraft', value: 'minecraft' },
-          { name: 'Hostinger', value: 'hostinger' },
-          { name: 'Gmail', value: 'gmail' },
-          { name: 'PayPal', value: 'paypal' }
-        )
     ),
 
   async execute(interaction) {
-    const service = interaction.options.getString('service').toLowerCase();
+    const searchTerm = interaction.options.getString('service').toLowerCase();
     const userId = interaction.user.id;
 
-    // Ensure user exists in database
+    if (!searchTerm) {
+      return interaction.reply({
+        embeds: [errorEmbed({ title: 'Invalid Search', description: 'Please provide a search term.' })],
+        ephemeral: true,
+      });
+    }
+
     await ensureUser(userId, interaction.user.username);
 
-    // Check if user is banned
     const user = await statements.getUser(userId);
     if (user && user.is_banned) {
       return interaction.reply({
@@ -42,7 +37,6 @@ module.exports = {
       });
     }
 
-    // Check if user is blacklisted
     if (user && user.is_blacklisted) {
       return interaction.reply({
         embeds: [errorEmbed({ title: 'Blacklisted', description: 'You are blacklisted from using stock commands.' })],
@@ -50,7 +44,6 @@ module.exports = {
       });
     }
 
-    // Check if user is muted
     if (user && user.mute_until > Math.floor(Date.now() / 1000)) {
       const muteEnd = new Date(user.mute_until * 1000);
       return interaction.reply({
@@ -64,7 +57,6 @@ module.exports = {
       });
     }
 
-    // Check cooldown
     const cooldownKey = `${userId}:s`;
     const cooldown = await statements.getCooldown(userId, cooldownKey);
     if (cooldown && cooldown.expires_at > Math.floor(Date.now() / 1000)) {
@@ -80,14 +72,13 @@ module.exports = {
       });
     }
 
-    // Set cooldown
     const cooldownDuration = config.bot.defaultCooldown;
     await statements.setCooldown(
       userId,
       cooldownKey,
       Math.floor(Date.now() / 1000) + cooldownDuration
     );
-    // Check stock channel restriction
+
     const stockChannelSetting = await statements.getSetting('stock_channel_id');
     if (stockChannelSetting && interaction.channelId !== stockChannelSetting.value) {
       return interaction.reply({
@@ -101,83 +92,54 @@ module.exports = {
       });
     }
 
-    // Check if stock exists
-    const stockDir = path.join(config.stock.directory, service);
-    if (!fs.existsSync(stockDir)) {
+    const results = searchStockInFiles(searchTerm);
+
+    if (results.length === 0) {
       return interaction.reply({
-        embeds: [errorEmbed({ title: 'No Stock', description: `No stock available for **${service}**.` })],
+        embeds: [errorEmbed({ title: 'No Stock', description: `No stock found matching **${searchTerm}**.` })],
         ephemeral: true,
       });
     }
 
-    // Get all stocks from all files
-    const files = fs.readdirSync(stockDir).filter((f) => f.startsWith('stock_') && f.endsWith('.txt'));
-    let allStocks = [];
-    let stockFileMap = [];
-
-    for (const file of files) {
-      const filePath = path.join(stockDir, file);
-      const stocks = parseStockFile(filePath);
-      for (const stock of stocks) {
-        allStocks.push(stock);
-        stockFileMap.push({ ...stock, file: filePath });
-      }
-    }
-
-    if (allStocks.length === 0) {
-      return interaction.reply({
-        embeds: [errorEmbed({ title: 'Out of Stock', description: `All **${service}** stock has been delivered.` })],
-        ephemeral: true,
-      });
-    }
-
-    // Acknowledge interaction
     await interaction.deferReply({ ephemeral: true });
 
-    // Deliver stock
-    const stockToDeliver = stockFileMap[0];
-    const stockCount = allStocks.length;
+    const stockToDeliver = results[0];
+    const remaining = results.length - 1;
 
     try {
-      // Send to DM
       const dmEmbed = stockEmbed({
-        title: `Stock: ${service.charAt(0).toUpperCase() + service.slice(1)}`,
+        title: `Stock: ${searchTerm.toUpperCase()}`,
         fields: [
           { name: 'Name / URL', value: `\`${stockToDeliver.url}\``, inline: false },
           { name: 'Email', value: `\`${stockToDeliver.email}\``, inline: false },
           { name: 'Password', value: `\`${stockToDeliver.password}\``, inline: false },
         ],
-        footer: `Remaining: ${stockCount - 1} | Service: ${service}`,
+        footer: `Remaining matching: ${remaining}`,
       });
 
       await interaction.user.send({ embeds: [dmEmbed] });
 
-      // Remove delivered stock
-      removeStockLine(service, stockToDeliver.original);
+      removeStockLineByContent(stockToDeliver.original);
 
-      // Log delivery
-      await statements.addStockLog(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'success');
-      stockLogger.info(`Stock delivered: user=${interaction.user.tag} service=${service} email=${maskEmail(stockToDeliver.email)} status=success`);
+      await statements.addStockLog(userId, interaction.user.username, searchTerm, maskEmail(stockToDeliver.email), 'success');
+      stockLogger.info(`Stock delivered: user=${interaction.user.tag} search=${searchTerm} email=${maskEmail(stockToDeliver.email)} status=success`);
 
-      // Send confirmation
       await interaction.editReply({
         embeds: [
           successEmbed({
             title: 'Stock Delivered',
-            description: `Stock for **${service}** has been sent to your DMs.`,
-            fields: [{ name: 'Remaining Stock', value: `${stockCount - 1}`, inline: true }],
+            description: `Stock for **${searchTerm}** has been sent to your DMs.`,
+            fields: [{ name: 'Remaining Matching', value: `${remaining}`, inline: true }],
           }),
         ],
       });
 
-      // Log to stock logs channel
-      await logToStockChannel(interaction, service, stockToDeliver, 'success');
+      await logToStockChannel(interaction, searchTerm, stockToDeliver, 'success');
     } catch (error) {
-      // DM failed - put stock back
       logger.error(`DM failed for ${interaction.user.tag}: ${error.message}`);
 
-      await statements.addStockLog(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'dm_failed');
-      stockLogger.info(`Stock delivery FAILED: user=${interaction.user.tag} service=${service} email=${maskEmail(stockToDeliver.email)} status=dm_failed`);
+      await statements.addStockLog(userId, interaction.user.username, searchTerm, maskEmail(stockToDeliver.email), 'dm_failed');
+      stockLogger.info(`Stock delivery FAILED: user=${interaction.user.tag} search=${searchTerm} email=${maskEmail(stockToDeliver.email)} status=dm_failed`);
 
       await interaction.editReply({
         embeds: [
@@ -188,7 +150,7 @@ module.exports = {
         ],
       });
 
-      await logToStockChannel(interaction, service, stockToDeliver, 'dm_failed');
+      await logToStockChannel(interaction, searchTerm, stockToDeliver, 'dm_failed');
     }
   },
 };
