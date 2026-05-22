@@ -2,7 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { adminEmbed, errorEmbed, successEmbed } = require('../../utils/embeds');
 const { logger } = require('../../utils/logger');
 const { statements, ensureUser } = require('../../database');
-const config = require('../../config');
+const config = require('../../utils/config');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,8 +19,8 @@ module.exports = {
   async execute(interaction) {
     const userId = interaction.user.id;
 
-    if (userId !== config.discord.ownerId) {
-      const user = statements.getUser.get(userId);
+    if (!config.discord.ownerIds.includes(userId)) {
+      const user = await statements.getUser(userId);
       if (!user || !user.is_admin) {
         return interaction.reply({
           embeds: [errorEmbed({ title: 'Access Denied', description: 'Only admins can unmute users.' })],
@@ -31,8 +31,8 @@ module.exports = {
 
     const target = interaction.options.getUser('user');
 
-    ensureUser(target.id, target.username);
-    statements.setMuteUntil.run(0, target.id);
+    await ensureUser(target.id, target.username);
+    await statements.setMuteUntil(0, target.id);
 
     logger.info(`User unmuted: ${target.tag} (${target.id}) by ${interaction.user.tag}`);
 

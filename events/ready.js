@@ -30,7 +30,7 @@ module.exports = {
 
     // Clear expired cooldowns on startup
     const { statements } = require('../database');
-    statements.clearExpiredCooldowns.run();
+    await statements.clearExpiredCooldowns();
 
     logger.info('Startup complete');
   },

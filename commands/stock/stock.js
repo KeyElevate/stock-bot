@@ -3,7 +3,7 @@ const { adminEmbed, errorEmbed, successEmbed } = require('../../utils/embeds');
 const { logger } = require('../../utils/logger');
 const { statements, ensureUser } = require('../../database');
 const { ensureDirectory, getStockServices } = require('../../utils/helpers');
-const config = require('../../config');
+const config = require('../../utils/config');
 const path = require('path');
 const fs = require('fs');
 
@@ -68,8 +68,8 @@ module.exports = {
     const userId = interaction.user.id;
 
     // Check if user is bot owner or admin
-    if (interaction.user.id !== config.discord.ownerId) {
-      const user = statements.getUser.get(userId);
+    if (!config.discord.ownerIds.includes(interaction.user.id)) {
+      const user = await statements.getUser(userId);
       if (!user || !user.is_admin) {
         return interaction.reply({
           embeds: [errorEmbed({ title: 'Access Denied', description: 'Only admins can manage stock sections.' })],

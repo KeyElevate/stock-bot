@@ -5,7 +5,10 @@ module.exports = {
   discord: {
     token: process.env.DISCORD_TOKEN,
     clientId: process.env.CLIENT_ID,
-    ownerId: process.env.OWNER_ID,
+    ownerIds: (process.env.OWNER_ID || '')
+      .split(',')
+      .map(id => id.trim())
+      .filter(id => id.length > 0),
   },
   dashboard: {
     port: parseInt(process.env.DASHBOARD_PORT) || 3000,

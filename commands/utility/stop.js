@@ -10,11 +10,10 @@ module.exports = {
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   async execute(interaction) {
-    // Check if user is bot owner
-    if (interaction.user.id !== config.discord.ownerId) {
+    if (!config.discord.ownerIds.includes(interaction.user.id)) {
       // Check if user is admin in database
       const { statements } = require('../../database');
-      const user = statements.getUser.get(interaction.user.id);
+      const user = await statements.getUser(interaction.user.id);
 
       if (!user || !user.is_admin) {
         return interaction.reply({

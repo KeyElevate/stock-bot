@@ -6,6 +6,7 @@ const { loadCommands } = require('./handlers/commandHandler');
 const { loadEvents } = require('./handlers/eventHandler');
 const config = require('./utils/config');
 const { ensureDirectory } = require('./utils/helpers');
+const { initializeDatabase } = require('./database');
 
 // Validate required environment variables
 const requiredEnvVars = ['DISCORD_TOKEN', 'CLIENT_ID', 'OWNER_ID'];
@@ -37,7 +38,20 @@ const client = new Client({
 loadCommands();
 loadEvents(client);
 
-// Anti-crash: Handle unhandled promise rejections
+// Initialize database and start bot
+(async () => {
+  try {
+    await initializeDatabase();
+    logger.info('Database initialized');
+
+    // Login to Discord
+    await client.login(config.discord.token);
+    logger.info(`Logged in as ${client.user?.tag}`);
+  } catch (error) {
+    logger.error(`Failed to start: ${error.message}`);
+    process.exit(1);
+  }
+})();
 process.on('unhandledRejection', (reason, promise) => {
   logger.error('Unhandled Promise Rejection:', reason);
   // Don't exit - keep the bot running
@@ -61,12 +75,6 @@ process.on('SIGINT', () => {
   logger.info('SIGINT received. Shutting down gracefully...');
   client.destroy();
   process.exit(0);
-});
-
-// Login to Discord
-client.login(config.discord.token).catch((error) => {
-  logger.error(`Failed to login: ${error.message}`);
-  process.exit(1);
 });
 
 // Export client for dashboard use

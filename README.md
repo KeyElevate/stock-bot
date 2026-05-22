@@ -90,88 +90,88 @@ stock-bot/
 
 ---
 
-## Full Installation Guide
+## Quick Install (One Command)
 
-### Step 1: Install Prerequisites
-
-Make sure you have **Node.js >= 18.0.0** and **npm** installed:
+For **Ubuntu/Debian** or **Termux** — this does everything automatically:
 
 ```bash
-node -v   # Should be >= 18.0.0
-npm -v
+bash <(curl -fsSL https://raw.githubusercontent.com/KeyElevate/stock-bot/main/install.sh)
 ```
 
-If you need to install Node.js:
+Or if you prefer to clone first:
+
+```bash
+git clone https://github.com/KeyElevate/stock-bot && cd stock-bot && bash install.sh
+```
+
+The script will:
+- Install Node.js 20 via nvm (if needed)
+- Clone the repository
+- Install all dependencies (bot + dashboard)
+- Build the React dashboard
+- Create `.env` from `.env.example`
+- Print next steps
+
+---
+
+## Manual Installation
+
+### Step 1: Prerequisites
+
+Requires **Node.js >= 18.0.0** and **npm**:
+
+```bash
+node -v ; npm -v
+```
+
+If Node.js is missing:
+
+```bash
+# Option A: nvm (recommended)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+source ~/.bashrc && nvm install 20 && nvm use 20
+
+# Option B: Ubuntu/Debian
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs
+```
+
+Also install **git** and **curl** if missing:
 
 ```bash
 # Ubuntu/Debian
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
+sudo apt-get install -y git curl
 
-# Or use nvm
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-nvm install 20
+# Termux
+pkg install git curl
 ```
 
-### Step 2: Clone or Download the Project
+### Step 2: Clone
 
 ```bash
-cd /path/to/your/projects
-git clone <repository-url> stock-bot
+git clone https://github.com/KeyElevate/stock-bot
 cd stock-bot
 ```
 
 ### Step 3: Install Bot Dependencies
 
-Install the main project dependencies (Discord.js, Express, SQLite, etc.):
-
 ```bash
 npm install
 ```
 
-> **Note:** If you're on a system where `better-sqlite3` fails to compile (e.g., Termux, Alpine), you may need to install build tools:
-> ```bash
-> # Ubuntu/Debian
-> sudo apt-get install -y build-essential python3
->
-> # Alpine
-> apk add build-base python3
-> ```
-
-### Step 4: Install Dashboard Dependencies
-
-Navigate to the React dashboard directory and install its dependencies:
+### Step 4: Install & Build Dashboard
 
 ```bash
-cd dashboard/web
-npm install
-cd ../..
+cd dashboard/web && npm install && npm run build && cd ../..
 ```
 
-### Step 5: Build the Dashboard
-
-Build the React SPA so the Express server can serve it:
-
-```bash
-cd dashboard/web
-npm run build
-cd ../..
-```
-
-This compiles the React app and outputs it to `dashboard/public/`.
-
-> **Development mode:** If you want to work on the dashboard with hot-reload, run `npm run dashboard:dev` from the project root instead of building.
-
-### Step 6: Configure Environment Variables
-
-Copy the example `.env` file and edit it:
+### Step 5: Configure .env
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Fill in your values:
+Fill in your values (see [Configuration](#configuration) below):
 
 ```env
 # ===========================================
@@ -179,7 +179,7 @@ Fill in your values:
 # ===========================================
 DISCORD_TOKEN=your-bot-token-here
 CLIENT_ID=your-client-id-here
-OWNER_ID=your-discord-user-id-here
+OWNER_ID=your-discord-user-id-here,your-alt-id-here
 
 # ===========================================
 # Dashboard Configuration
@@ -202,7 +202,7 @@ MAX_STOCK_PER_UPLOAD=500
 LOG_LEVEL=info
 ```
 
-### Step 7: Create the Discord Bot
+### Step 6: Create the Discord Bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Click **New Application** and give it a name
@@ -218,8 +218,9 @@ LOG_LEVEL=info
    - Copy the generated URL at the bottom and open it in your browser to invite the bot
 8. Enable **Developer Mode** in Discord (User Settings > Advanced > Developer Mode)
 9. Right-click your own username in Discord and click **Copy User ID** → paste it as `OWNER_ID` in your `.env`
+   - To add multiple owners, separate IDs with commas: `OWNER_ID=id1,id2,id3`
 
-### Step 8: Run the Bot and Dashboard
+### Step 7: Run the Bot and Dashboard
 
 ```bash
 # Run both bot and dashboard together
@@ -236,7 +237,7 @@ npm start
 npm run dashboard
 ```
 
-### Step 9: Access the Dashboard
+### Step 8: Access the Dashboard
 
 Open your browser to:
 
@@ -439,9 +440,10 @@ tar -xzf stock-bot-backup-YYYYMMDD.tar.gz
 - Verify your `DISCORD_TOKEN` is correct and not expired
 - Check logs: `tail -f logs/bot.log`
 
-### `better-sqlite3` fails to install
+### `sqlite3` fails to install
 - Install build tools: `sudo apt-get install build-essential python3`
-- Or use a pre-built Node version that has matching binaries
+- On Termux: `pkg install binutils` (sqlite3 provides prebuilt binaries for most platforms)
+- This project uses `sqlite3` (not `better-sqlite3`) specifically for compatibility with Termux, Android, and systems without native build tools
 
 ### Dashboard won't start
 - Check if port 3000 is already in use: `lsof -i :3000`

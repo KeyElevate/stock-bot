@@ -32,11 +32,11 @@ module.exports = {
     }
 
     // Ensure user exists in database
-    ensureUser(interaction.user.id, interaction.user.username);
+    await ensureUser(interaction.user.id, interaction.user.username);
 
     // Log command usage
     try {
-      statements.addCommandLog.run(
+      await statements.addCommandLog(
         interaction.user.id,
         interaction.user.username,
         interaction.commandName,

@@ -2,8 +2,8 @@ const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
 const { adminEmbed, errorEmbed, successEmbed } = require('../../utils/embeds');
 const { logger } = require('../../utils/logger');
 const { statements, ensureUser } = require('../../database');
-const { parseDuration, formatTimestamp } = require('../../utils/helpers');
-const config = require('../../config');
+const { parseDuration } = require('../../utils/helpers');
+const config = require('../../utils/config');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -36,8 +36,8 @@ module.exports = {
   async execute(interaction) {
     const userId = interaction.user.id;
 
-    if (userId !== config.discord.ownerId) {
-      const user = statements.getUser.get(userId);
+    if (!config.discord.ownerIds.includes(userId)) {
+      const user = await statements.getUser(userId);
       if (!user || !user.is_admin) {
         return interaction.reply({
           embeds: [errorEmbed({ title: 'Access Denied', description: 'Only admins can mute users.' })],
@@ -49,7 +49,7 @@ module.exports = {
     const target = interaction.options.getUser('user');
     const durationStr = interaction.options.getString('duration');
 
-    if (target.id === userId || target.id === config.discord.ownerId) {
+    if (target.id === userId || config.discord.ownerIds.includes(target.id)) {
       return interaction.reply({
         embeds: [errorEmbed({ title: 'Invalid Target', description: 'You cannot mute this user.' })],
         ephemeral: true,
@@ -66,8 +66,8 @@ module.exports = {
 
     const muteUntil = Math.floor(Date.now() / 1000) + Math.floor(durationMs / 1000);
 
-    ensureUser(target.id, target.username);
-    statements.setMuteUntil.run(muteUntil, target.id);
+    await ensureUser(target.id, target.username);
+    await statements.setMuteUntil(muteUntil, target.id);
 
     const muteEnd = new Date(muteUntil * 1000);
 

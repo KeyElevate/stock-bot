@@ -30,10 +30,10 @@ module.exports = {
     }
 
     // Ensure user exists in database
-    ensureUser(userId, interaction.user.username);
+    await ensureUser(userId, interaction.user.username);
 
     // Check if user is banned
-    const user = statements.getUser.get(userId);
+    const user = await statements.getUser(userId);
     if (user && user.is_banned) {
       return interaction.reply({
         embeds: [errorEmbed({ title: 'Banned', description: 'You are banned from using this bot.' })],
@@ -65,7 +65,7 @@ module.exports = {
 
     // Check cooldown
     const cooldownKey = `${userId}:s-u`;
-    const cooldown = statements.getCooldown.get(userId, cooldownKey);
+    const cooldown = await statements.getCooldown(userId, cooldownKey);
     if (cooldown && cooldown.expires_at > Math.floor(Date.now() / 1000)) {
       const remaining = cooldown.expires_at - Math.floor(Date.now() / 1000);
       return interaction.reply({
@@ -81,15 +81,15 @@ module.exports = {
 
     // Set cooldown
     const cooldownDuration = config.bot.defaultCooldown;
-    statements.setCooldown.run(
+    await statements.setCooldown(
       userId,
       cooldownKey,
       Math.floor(Date.now() / 1000) + cooldownDuration
     );
 
     // Check stock channel restriction
-    const stockChannelId = statements.getSetting.get('stock_channel_id');
-    if (stockChannelId && interaction.channelId !== stockChannelId.value) {
+    const stockChannelSetting = await statements.getSetting('stock_channel_id');
+    if (stockChannelSetting && interaction.channelId !== stockChannelSetting.value) {
       return interaction.reply({
         embeds: [
           errorEmbed({
@@ -156,7 +156,7 @@ module.exports = {
       removeStockLine(service, stockToDeliver.original);
 
       // Log delivery
-      statements.addStockLog.run(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'success');
+      await statements.addStockLog(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'success');
       stockLogger.info(`Stock delivered: user=${interaction.user.tag} service=${service} email=${maskEmail(stockToDeliver.email)} status=success`);
 
       // Send confirmation
@@ -175,7 +175,7 @@ module.exports = {
     } catch (error) {
       logger.error(`DM failed for ${interaction.user.tag}: ${error.message}`);
 
-      statements.addStockLog.run(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'dm_failed');
+      await statements.addStockLog(userId, interaction.user.username, service, maskEmail(stockToDeliver.email), 'dm_failed');
       stockLogger.info(`Stock delivery FAILED: user=${interaction.user.tag} service=${service} email=${maskEmail(stockToDeliver.email)} status=dm_failed`);
 
       await interaction.editReply({
@@ -195,11 +195,11 @@ module.exports = {
 async function logToStockChannel(interaction, service, stock, status) {
   try {
     const { statements } = require('../../database');
-    const logChannelId = statements.getSetting.get('stock_logs_channel_id');
+    const logChannelSetting = await statements.getSetting('stock_logs_channel_id');
 
-    if (!logChannelId) return;
+    if (!logChannelSetting) return;
 
-    const channel = await interaction.client.channels.fetch(logChannelId.value).catch(() => null);
+    const channel = await interaction.client.channels.fetch(logChannelSetting.value).catch(() => null);
     if (!channel) return;
 
     const logEmbed = stockEmbed({

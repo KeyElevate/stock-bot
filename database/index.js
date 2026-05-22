@@ -1,209 +1,261 @@
-const Database = require('better-sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const config = require('../utils/config');
 const fs = require('fs');
 
 const dbPath = path.join(config.paths.database, 'bot.db');
 
-// Ensure database directory exists
 if (!fs.existsSync(config.paths.database)) {
   fs.mkdirSync(config.paths.database, { recursive: true });
 }
 
-const db = new Database(dbPath);
+const db = new sqlite3.Database(dbPath);
 
-// Enable WAL mode for better performance and concurrency
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-// Create tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    username TEXT,
-    is_admin INTEGER DEFAULT 0,
-    is_blacklisted INTEGER DEFAULT 0,
-    is_banned INTEGER DEFAULT 0,
-    mute_until INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS cooldowns (
-    user_id TEXT NOT NULL,
-    command TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    PRIMARY KEY (user_id, command)
-  );
-
-  CREATE TABLE IF NOT EXISTS stock_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    username TEXT,
-    service TEXT NOT NULL,
-    email TEXT NOT NULL,
-    status TEXT NOT NULL,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS command_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    username TEXT,
-    command TEXT NOT NULL,
-    guild_id TEXT,
-    channel_id TEXT,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS dashboard_sessions (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS backups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    size INTEGER NOT NULL,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-  );
-`);
-
-// Prepared statements for common operations
-const statements = {
-  // Settings
-  getSetting: db.prepare('SELECT value FROM settings WHERE key = ?'),
-  setSetting: db.prepare(
-    'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)'
-  ),
-  getAllSettings: db.prepare('SELECT * FROM settings'),
-
-  // Users
-  getUser: db.prepare('SELECT * FROM users WHERE id = ?'),
-  createUser: db.prepare(
-    'INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)'
-  ),
-  updateUser: db.prepare(
-    'UPDATE users SET username = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?'
-  ),
-  setAdmin: db.prepare(
-    'UPDATE users SET is_admin = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?'
-  ),
-  setBlacklisted: db.prepare(
-    'UPDATE users SET is_blacklisted = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?'
-  ),
-  setBanned: db.prepare(
-    'UPDATE users SET is_banned = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?'
-  ),
-  setMuteUntil: db.prepare(
-    'UPDATE users SET mute_until = ?, updated_at = strftime(\'%s\', \'now\') WHERE id = ?'
-  ),
-  getAllUsers: db.prepare('SELECT * FROM users ORDER BY created_at DESC'),
-  getBlacklistedUsers: db.prepare(
-    'SELECT * FROM users WHERE is_blacklisted = 1 ORDER BY created_at DESC'
-  ),
-  getBannedUsers: db.prepare(
-    'SELECT * FROM users WHERE is_banned = 1 ORDER BY created_at DESC'
-  ),
-  getMutedUsers: db.prepare(
-    'SELECT * FROM users WHERE mute_until > strftime(\'%s\', \'now\') ORDER BY mute_until DESC'
-  ),
-
-  // Cooldowns
-  getCooldown: db.prepare(
-    'SELECT expires_at FROM cooldowns WHERE user_id = ? AND command = ?'
-  ),
-  setCooldown: db.prepare(
-    'INSERT OR REPLACE INTO cooldowns (user_id, command, expires_at) VALUES (?, ?, ?)'
-  ),
-  clearCooldown: db.prepare(
-    'DELETE FROM cooldowns WHERE user_id = ? AND command = ?'
-  ),
-  clearExpiredCooldowns: db.prepare(
-    'DELETE FROM cooldowns WHERE expires_at < strftime(\'%s\', \'now\')'
-  ),
-
-  // Stock logs
-  addStockLog: db.prepare(
-    'INSERT INTO stock_logs (user_id, username, service, email, status) VALUES (?, ?, ?, ?, ?)'
-  ),
-  getStockLogs: db.prepare(
-    'SELECT * FROM stock_logs ORDER BY created_at DESC LIMIT ? OFFSET ?'
-  ),
-  getStockLogsCount: db.prepare('SELECT COUNT(*) as count FROM stock_logs'),
-  getStockLogsByService: db.prepare(
-    'SELECT * FROM stock_logs WHERE service = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
-  ),
-  getStockLogsCountByService: db.prepare(
-    'SELECT COUNT(*) as count FROM stock_logs WHERE service = ?'
-  ),
-  getRecentStockLogs: db.prepare(
-    'SELECT * FROM stock_logs ORDER BY created_at DESC LIMIT 50'
-  ),
-
-  // Command logs
-  addCommandLog: db.prepare(
-    'INSERT INTO command_logs (user_id, username, command, guild_id, channel_id) VALUES (?, ?, ?, ?, ?)'
-  ),
-  getCommandLogs: db.prepare(
-    'SELECT * FROM command_logs ORDER BY created_at DESC LIMIT ? OFFSET ?'
-  ),
-  getCommandLogsCount: db.prepare('SELECT COUNT(*) as count FROM command_logs'),
-  getCommandUsageStats: db.prepare(
-    'SELECT command, COUNT(*) as count FROM command_logs GROUP BY command ORDER BY count DESC'
-  ),
-  getRecentCommandLogs: db.prepare(
-    'SELECT * FROM command_logs ORDER BY created_at DESC LIMIT 50'
-  ),
-};
-
-// Helper functions
-function ensureUser(userId, username) {
-  const user = statements.getUser.get(userId);
-  if (!user) {
-    statements.createUser.run(userId, username || 'Unknown');
-    return statements.getUser.get(userId);
-  }
-  if (user.username !== username && username) {
-    statements.updateUser.run(username, userId);
-  }
-  return statements.getUser.get(userId);
+// Promisified wrappers for sqlite3
+function dbGet(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
 }
 
-function getStockLogsPaginated(page = 1, limit = 20) {
+function dbAll(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+}
+
+function dbRun(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function dbExec(sql) {
+  return new Promise((resolve, reject) => {
+    db.exec(sql, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
+// Initialize tables
+async function initializeDatabase() {
+  await dbExec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT,
+      is_admin INTEGER DEFAULT 0,
+      is_blacklisted INTEGER DEFAULT 0,
+      is_banned INTEGER DEFAULT 0,
+      mute_until INTEGER DEFAULT 0,
+      created_at INTEGER DEFAULT (strftime('%s', 'now')),
+      updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS cooldowns (
+      user_id TEXT NOT NULL,
+      command TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, command)
+    );
+
+    CREATE TABLE IF NOT EXISTS stock_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      username TEXT,
+      service TEXT NOT NULL,
+      email TEXT NOT NULL,
+      status TEXT NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS command_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      username TEXT,
+      command TEXT NOT NULL,
+      guild_id TEXT,
+      channel_id TEXT,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS dashboard_sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS backups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+  `);
+}
+
+// Async statement helpers
+const statements = {
+  // Settings
+  getSetting: (key) => dbGet('SELECT value FROM settings WHERE key = ?', [key]),
+  setSetting: (key, value) =>
+    dbRun('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]),
+  getAllSettings: () => dbAll('SELECT * FROM settings'),
+
+  // Users
+  getUser: (id) => dbGet('SELECT * FROM users WHERE id = ?', [id]),
+  createUser: (id, username) =>
+    dbRun('INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)', [id, username]),
+  updateUser: (username, id) =>
+    dbRun(
+      "UPDATE users SET username = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+      [username, id]
+    ),
+  setAdmin: (value, id) =>
+    dbRun(
+      "UPDATE users SET is_admin = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+      [value, id]
+    ),
+  setBlacklisted: (value, id) =>
+    dbRun(
+      "UPDATE users SET is_blacklisted = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+      [value, id]
+    ),
+  setBanned: (value, id) =>
+    dbRun(
+      "UPDATE users SET is_banned = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+      [value, id]
+    ),
+  setMuteUntil: (until, id) =>
+    dbRun(
+      "UPDATE users SET mute_until = ?, updated_at = strftime('%s', 'now') WHERE id = ?",
+      [until, id]
+    ),
+  getAllUsers: () =>
+    dbAll('SELECT * FROM users ORDER BY created_at DESC'),
+  getBlacklistedUsers: () =>
+    dbAll('SELECT * FROM users WHERE is_blacklisted = 1 ORDER BY created_at DESC'),
+  getBannedUsers: () =>
+    dbAll('SELECT * FROM users WHERE is_banned = 1 ORDER BY created_at DESC'),
+  getMutedUsers: () =>
+    dbAll(
+      "SELECT * FROM users WHERE mute_until > strftime('%s', 'now') ORDER BY mute_until DESC"
+    ),
+
+  // Cooldowns
+  getCooldown: (userId, command) =>
+    dbGet('SELECT expires_at FROM cooldowns WHERE user_id = ? AND command = ?', [
+      userId,
+      command,
+    ]),
+  setCooldown: (userId, command, expiresAt) =>
+    dbRun(
+      'INSERT OR REPLACE INTO cooldowns (user_id, command, expires_at) VALUES (?, ?, ?)',
+      [userId, command, expiresAt]
+    ),
+  clearCooldown: (userId, command) =>
+    dbRun('DELETE FROM cooldowns WHERE user_id = ? AND command = ?', [userId, command]),
+  clearExpiredCooldowns: () =>
+    dbRun("DELETE FROM cooldowns WHERE expires_at < strftime('%s', 'now')"),
+
+  // Stock logs
+  addStockLog: (userId, username, service, email, status) =>
+    dbRun(
+      'INSERT INTO stock_logs (user_id, username, service, email, status) VALUES (?, ?, ?, ?, ?)',
+      [userId, username, service, email, status]
+    ),
+  getStockLogs: (limit, offset) =>
+    dbAll('SELECT * FROM stock_logs ORDER BY created_at DESC LIMIT ? OFFSET ?', [
+      limit,
+      offset,
+    ]),
+  getStockLogsCount: () => dbGet('SELECT COUNT(*) as count FROM stock_logs'),
+  getStockLogsByService: (service, limit, offset) =>
+    dbAll(
+      'SELECT * FROM stock_logs WHERE service = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      [service, limit, offset]
+    ),
+  getStockLogsCountByService: (service) =>
+    dbGet('SELECT COUNT(*) as count FROM stock_logs WHERE service = ?', [service]),
+  getRecentStockLogs: () =>
+    dbAll('SELECT * FROM stock_logs ORDER BY created_at DESC LIMIT 50'),
+
+  // Command logs
+  addCommandLog: (userId, username, command, guildId, channelId) =>
+    dbRun(
+      'INSERT INTO command_logs (user_id, username, command, guild_id, channel_id) VALUES (?, ?, ?, ?, ?)',
+      [userId, username, command, guildId, channelId]
+    ),
+  getCommandLogs: (limit, offset) =>
+    dbAll('SELECT * FROM command_logs ORDER BY created_at DESC LIMIT ? OFFSET ?', [
+      limit,
+      offset,
+    ]),
+  getCommandLogsCount: () => dbGet('SELECT COUNT(*) as count FROM command_logs'),
+  getCommandUsageStats: () =>
+    dbAll(
+      'SELECT command, COUNT(*) as count FROM command_logs GROUP BY command ORDER BY count DESC'
+    ),
+  getRecentCommandLogs: () =>
+    dbAll('SELECT * FROM command_logs ORDER BY created_at DESC LIMIT 50'),
+};
+
+async function ensureUser(userId, username) {
+  const user = await statements.getUser(userId);
+  if (!user) {
+    await statements.createUser(userId, username || 'Unknown');
+    return statements.getUser(userId);
+  }
+  if (user.username !== username && username) {
+    await statements.updateUser(username, userId);
+  }
+  return user;
+}
+
+async function getStockLogsPaginated(page = 1, limit = 20) {
   const offset = (page - 1) * limit;
-  const logs = statements.getStockLogs.all(limit, offset);
-  const total = statements.getStockLogsCount.get();
+  const logs = await statements.getStockLogs(limit, offset);
+  const totalRow = await statements.getStockLogsCount();
   return {
     logs,
-    total: total.count,
+    total: totalRow ? totalRow.count : 0,
     page,
-    totalPages: Math.ceil(total.count / limit),
+    totalPages: totalRow ? Math.ceil(totalRow.count / limit) : 0,
   };
 }
 
-function getCommandLogsPaginated(page = 1, limit = 20) {
+async function getCommandLogsPaginated(page = 1, limit = 20) {
   const offset = (page - 1) * limit;
-  const logs = statements.getCommandLogs.all(limit, offset);
-  const total = statements.getCommandLogsCount.get();
+  const logs = await statements.getCommandLogs(limit, offset);
+  const totalRow = await statements.getCommandLogsCount();
   return {
     logs,
-    total: total.count,
+    total: totalRow ? totalRow.count : 0,
     page,
-    totalPages: Math.ceil(total.count / limit),
+    totalPages: totalRow ? Math.ceil(totalRow.count / limit) : 0,
   };
 }
 
 module.exports = {
   db,
   statements,
+  initializeDatabase,
   ensureUser,
   getStockLogsPaginated,
   getCommandLogsPaginated,
