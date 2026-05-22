@@ -1,15 +1,22 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
-const { errorEmbed, successEmbed } = require('../../utils/embeds');
+const { errorEmbed, successEmbed, warningEmbed } = require('../../utils/embeds');
 const { logger } = require('../../utils/logger');
 const { statements } = require('../../database');
-const { extractServicesFromFlatFiles, importServiceLines, getAllStockFiles } = require('../../utils/helpers');
+const { getStockServices, getStockCount, searchStockInFiles, importServiceLines, getAllStockFiles } = require('../../utils/helpers');
 const config = require('../../utils/config');
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('stock-a-p')
-    .setDescription('Auto-parse all stock files and import detected services immediately (admin only)')
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+    .setDescription('Refill low-stock services by searching flat stock files (admin only)')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addIntegerOption((option) =>
+      option
+        .setName('threshold')
+        .setDescription('Refill services with this many or fewer items (default: 5)')
+        .setRequired(false)
+        .setMinValue(1)
+    ),
 
   async execute(interaction) {
     if (!config.discord.ownerIds.includes(interaction.user.id)) {
@@ -30,38 +37,59 @@ module.exports = {
       });
     }
 
+    const threshold = interaction.options.getInteger('threshold') || 5;
+
     await interaction.deferReply({ ephemeral: true });
 
-    const services = extractServicesFromFlatFiles();
-    const serviceEntries = Object.entries(services);
+    const existingServices = getStockServices();
 
-    if (serviceEntries.length === 0) {
+    if (existingServices.length === 0) {
       return interaction.editReply({
-        embeds: [errorEmbed({ title: 'No Services Detected', description: 'Could not detect any valid services from the stock files.', })],
+        embeds: [errorEmbed({ title: 'No Services', description: 'No existing stock sections found. Use `/stock-u-e-p` first to create them.', })],
       });
     }
 
-    let created = 0;
+    const lowStock = existingServices
+      .map((s) => ({ name: s, count: getStockCount(s) }))
+      .filter((s) => s.count <= threshold);
+
+    if (lowStock.length === 0) {
+      return interaction.editReply({
+        embeds: [successEmbed({ title: 'All Stocked Up', description: `All ${existingServices.length} services have more than ${threshold} items. Nothing to refill.`, })],
+      });
+    }
+
+    let refilled = 0;
     let imported = 0;
     let skipped = 0;
 
-    for (const [svc, lines] of serviceEntries) {
-      const result = importServiceLines(svc, lines);
-      if (result.imported > 0) created++;
+    for (const svc of lowStock) {
+      const results = searchStockInFiles(svc.name);
+      if (results.length === 0) continue;
+
+      const lines = results.map((r) => r.original);
+      const result = importServiceLines(svc.name, lines);
+      if (result.imported > 0) refilled++;
       imported += result.imported;
       skipped += result.skipped;
     }
 
-    logger.info(`Stock auto-parse: ${created} services, ${imported} imported, ${skipped} skipped by ${interaction.user.tag}`);
+    if (refilled === 0) {
+      return interaction.editReply({
+        embeds: [warningEmbed({ title: 'Nothing Found', description: `Found ${lowStock.length} low-stock service(s), but no matching entries in flat stock files.`, })],
+      });
+    }
+
+    logger.info(`Stock auto-parse: refilled ${refilled}/${lowStock.length} low-stock services, ${imported} imported, ${skipped} skipped by ${interaction.user.tag}`);
 
     await interaction.editReply({
       embeds: [
         successEmbed({
-          title: 'Import Completed',
+          title: 'Refill Completed',
           description: [
-            `✓ Created services: **${created}**`,
+            `✓ Refilled: **${refilled}** / **${lowStock.length}** low-stock service${lowStock.length > 1 ? 's' : ''}`,
             `✓ Imported accounts: **${imported}**`,
-            `✓ Skipped duplicates: **${skipped}**`,
+            `✗ Skipped duplicates: **${skipped}**`,
           ].join('\n'),
         }),
       ],

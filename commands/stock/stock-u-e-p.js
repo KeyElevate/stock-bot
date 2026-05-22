@@ -41,17 +41,30 @@ module.exports = {
       });
     }
 
-    let desc = serviceEntries
-      .sort((a, b) => b[1].length - a[1].length)
-      .map(([svc, lines]) => `**${svc}** → ${lines.length} account${lines.length > 1 ? 's' : ''}`)
-      .join('\n');
-
     const total = serviceEntries.reduce((sum, [, lines]) => sum + lines.length, 0);
+    const sorted = serviceEntries.sort((a, b) => b[1].length - a[1].length);
+    const MAX_DESC = 4000;
+
+    let descLines = [];
+    let descSize = 0;
+
+    for (const [svc, lines] of sorted) {
+      const line = `**${svc}** → ${lines.length} account${lines.length > 1 ? 's' : ''}`;
+      if (descSize + line.length + 1 > MAX_DESC) break;
+      descLines.push(line);
+      descSize += line.length + 1;
+    }
+
+    let desc = descLines.join('\n');
+    const hidden = sorted.length - descLines.length;
+    if (hidden > 0) {
+      desc += `\n*...and ${hidden} more service${hidden > 1 ? 's' : ''}*`;
+    }
 
     const embed = {
       color: 0x00bfff,
       title: 'Detected Services',
-      description: `Found **${serviceEntries.length}** service${serviceEntries.length > 1 ? 's' : ''} across **${total}** account${total > 1 ? 's' : ''}:\n\n${desc}`,
+      description: `Found **${sorted.length}** service${sorted.length > 1 ? 's' : ''} across **${total}** account${total > 1 ? 's' : ''}:\n\n${desc}`,
       footer: { text: 'Import will create stock sections and move accounts.' },
     };
 
