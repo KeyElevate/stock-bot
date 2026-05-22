@@ -42,6 +42,10 @@ v2.1.0 — Termux Compatibility & Cross-Platform Release
   - Applied to both main bot and dashboard/web
 - **Production mode**: `npm install --omit=dev` for main bot dependencies
 - **No nested re-download**: Checks for `package.json` + `index.js` before cloning
+- **Termux nvm fix**: Detects Termux via `/data/data/com.termux/files/usr`
+  - Removes broken `~/.nvm` directory and cleans `~/.bashrc` of nvm lines
+  - Installs `nodejs-lts` via `pkg install` instead of nvm (nvm binaries are incompatible with Termux's Android/Bionic libc)
+  - Linux ARM64 binaries cause `unexpected e_type: 2` on Termux — avoided completely
 - Supports: Ubuntu, Debian, Termux, ARM64
 
 ### Dashboard API — Async Migration
