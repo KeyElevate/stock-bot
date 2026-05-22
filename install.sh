@@ -56,24 +56,25 @@ check_cmd() {
 check_cmd git
 check_cmd curl
 
-NEED_NODE=false
+FORCE_NODE20=false
 if command -v node &>/dev/null; then
-  NODE_VER=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [ "$NODE_VER" -ge 18 ] 2>/dev/null; then
-    p "  ${GREEN}✓${NC} Node.js $(node -v) already installed"
+  NODE_FULL=$(node -v)
+  NODE_MAJOR=$(echo "$NODE_FULL" | sed 's/v//' | cut -d. -f1)
+  if [ "$NODE_MAJOR" = "20" ]; then
+    p "  ${GREEN}✓${NC} Node.js $NODE_FULL detected"
   else
-    p "  ${YELLOW}⚠ Node.js $(node -v) is too old (need >= 18)${NC}"
-    NEED_NODE=true
+    p "  ${YELLOW}⚠ Node.js $NODE_FULL detected — forcing Node.js 20${NC}"
+    FORCE_NODE20=true
   fi
 else
-  NEED_NODE=true
+  FORCE_NODE20=true
 fi
 
 if command -v npm &>/dev/null; then
   p "  ${GREEN}✓${NC} npm $(npm -v) already installed"
 fi
 
-if [ "$NEED_NODE" = true ]; then
+if [ "$FORCE_NODE20" = true ]; then
   p ""
   p "  ${CYAN}→${NC} Installing Node.js 20 via nvm..."
   export NVM_DIR="$HOME/.nvm"
@@ -83,7 +84,8 @@ if [ "$NEED_NODE" = true ]; then
   [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
   nvm install 20
   nvm use 20
-  p "  ${GREEN}✓${NC} Node.js $(node -v) installed via nvm"
+  nvm alias default 20
+  p "  ${GREEN}✓${NC} Node.js $(node -v) active"
 fi
 
 if [ -n "$MISSING" ]; then
@@ -136,7 +138,13 @@ p ""
 # --------------------------------------------------
 p "${BOLD}Step 3: Installing bot dependencies...${NC}"
 
-npm install
+if [ -d "node_modules" ] || [ -f "package-lock.json" ]; then
+  p "  ${CYAN}→${NC} Cleaning previous install..."
+  rm -rf node_modules package-lock.json
+  p "  ${GREEN}✓${NC} Cleaned"
+fi
+
+npm install --omit=dev
 p "  ${GREEN}✓${NC} Bot dependencies installed"
 p ""
 
@@ -146,6 +154,10 @@ p ""
 p "${BOLD}Step 4: Setting up dashboard...${NC}"
 
 cd dashboard/web
+if [ -d "node_modules" ] || [ -f "package-lock.json" ]; then
+  p "  ${CYAN}→${NC} Cleaning previous dashboard install..."
+  rm -rf node_modules package-lock.json
+fi
 npm install
 npm run build
 cd ../..

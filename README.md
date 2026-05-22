@@ -118,7 +118,7 @@ The script will:
 
 ### Step 1: Prerequisites
 
-Requires **Node.js >= 18.0.0** and **npm**:
+Requires **Node.js 20 LTS** and **npm**:
 
 ```bash
 node -v ; npm -v
@@ -127,11 +127,11 @@ node -v ; npm -v
 If Node.js is missing:
 
 ```bash
-# Option A: nvm (recommended)
+# nvm (recommended — installs Node.js 20 exactly)
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 source ~/.bashrc && nvm install 20 && nvm use 20
 
-# Option B: Ubuntu/Debian
+# Ubuntu/Debian (may install a different minor version)
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs
 ```
 
@@ -440,10 +440,20 @@ tar -xzf stock-bot-backup-YYYYMMDD.tar.gz
 - Verify your `DISCORD_TOKEN` is correct and not expired
 - Check logs: `tail -f logs/bot.log`
 
-### `sqlite3` fails to install
-- Install build tools: `sudo apt-get install build-essential python3`
-- On Termux: `pkg install binutils` (sqlite3 provides prebuilt binaries for most platforms)
-- This project uses `sqlite3` (not `better-sqlite3`) specifically for compatibility with Termux, Android, and systems without native build tools
+### `sql.js` fails to install
+- `sql.js` is pure JavaScript (WebAssembly) — no native compilation needed
+- It works on all platforms: Ubuntu, Debian, Termux, Android ARM64, VPS
+- If you see install errors, ensure you have at least 256MB of available memory
+
+### Node.js 24 compatibility
+- This bot requires **Node.js 20 LTS** specifically
+- Node.js 24+ is not supported due to native package compatibility
+- Use `nvm` to install and switch to Node.js 20:
+  ```
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+  nvm install 20
+  nvm use 20
+  ```
 
 ### Dashboard won't start
 - Check if port 3000 is already in use: `lsof -i :3000`

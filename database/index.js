@@ -1,124 +1,130 @@
-const sqlite3 = require('sqlite3').verbose();
+const initSqlJs = require('sql.js');
 const path = require('path');
 const config = require('../utils/config');
 const fs = require('fs');
 
 const dbPath = path.join(config.paths.database, 'bot.db');
+let db = null;
+let SQL = null;
 
-if (!fs.existsSync(config.paths.database)) {
-  fs.mkdirSync(config.paths.database, { recursive: true });
-}
-
-const db = new sqlite3.Database(dbPath);
-
-// Promisified wrappers for sqlite3
-function dbGet(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-}
-
-function dbAll(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
-}
-
-function dbRun(sql, params = []) {
-  return new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
-}
-
-function dbExec(sql) {
-  return new Promise((resolve, reject) => {
-    db.exec(sql, (err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
-}
-
-// Initialize tables
 async function initializeDatabase() {
-  await dbExec(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
+  if (!fs.existsSync(config.paths.database)) {
+    fs.mkdirSync(config.paths.database, { recursive: true });
+  }
 
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT,
-      is_admin INTEGER DEFAULT 0,
-      is_blacklisted INTEGER DEFAULT 0,
-      is_banned INTEGER DEFAULT 0,
-      mute_until INTEGER DEFAULT 0,
-      created_at INTEGER DEFAULT (strftime('%s', 'now')),
-      updated_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
+  SQL = await initSqlJs();
 
-    CREATE TABLE IF NOT EXISTS cooldowns (
-      user_id TEXT NOT NULL,
-      command TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      PRIMARY KEY (user_id, command)
-    );
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
 
-    CREATE TABLE IF NOT EXISTS stock_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      username TEXT,
-      service TEXT NOT NULL,
-      email TEXT NOT NULL,
-      status TEXT NOT NULL,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
+  db.run('PRAGMA journal_mode=WAL');
 
-    CREATE TABLE IF NOT EXISTS command_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id TEXT NOT NULL,
-      username TEXT,
-      command TEXT NOT NULL,
-      guild_id TEXT,
-      channel_id TEXT,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
+  db.run(`CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )`);
 
-    CREATE TABLE IF NOT EXISTS dashboard_sessions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      expires_at INTEGER NOT NULL,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
+  db.run(`CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT,
+    is_admin INTEGER DEFAULT 0,
+    is_blacklisted INTEGER DEFAULT 0,
+    is_banned INTEGER DEFAULT 0,
+    mute_until INTEGER DEFAULT 0,
+    created_at INTEGER DEFAULT (strftime('%s', 'now')),
+    updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )`);
 
-    CREATE TABLE IF NOT EXISTS backups (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      filename TEXT NOT NULL,
-      size INTEGER NOT NULL,
-      created_at INTEGER DEFAULT (strftime('%s', 'now'))
-    );
-  `);
+  db.run(`CREATE TABLE IF NOT EXISTS cooldowns (
+    user_id TEXT NOT NULL,
+    command TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, command)
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS stock_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    username TEXT,
+    service TEXT NOT NULL,
+    email TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS command_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    username TEXT,
+    command TEXT NOT NULL,
+    guild_id TEXT,
+    channel_id TEXT,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS dashboard_sessions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )`);
+
+  db.run(`CREATE TABLE IF NOT EXISTS backups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+  )`);
+
+  saveDatabase();
 }
 
-// Async statement helpers
+function saveDatabase() {
+  if (!db) return;
+  const data = db.export();
+  const buffer = Buffer.from(data);
+  fs.writeFileSync(dbPath, buffer);
+}
+
+async function dbGet(sql, params = []) {
+  const stmt = db.prepare(sql);
+  if (params.length > 0) stmt.bind(params);
+  const row = stmt.step() ? stmt.getAsObject() : null;
+  stmt.free();
+  return row;
+}
+
+async function dbAll(sql, params = []) {
+  const stmt = db.prepare(sql);
+  if (params.length > 0) stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return rows;
+}
+
+async function dbRun(sql, params = []) {
+  const stmt = db.prepare(sql);
+  if (params.length > 0) stmt.bind(params);
+  stmt.step();
+  const changes = db.getRowsModified();
+  stmt.free();
+  saveDatabase();
+  return { lastID: 0, changes };
+}
+
 const statements = {
-  // Settings
   getSetting: (key) => dbGet('SELECT value FROM settings WHERE key = ?', [key]),
   setSetting: (key, value) =>
     dbRun('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]),
   getAllSettings: () => dbAll('SELECT * FROM settings'),
 
-  // Users
   getUser: (id) => dbGet('SELECT * FROM users WHERE id = ?', [id]),
   createUser: (id, username) =>
     dbRun('INSERT OR IGNORE INTO users (id, username) VALUES (?, ?)', [id, username]),
@@ -158,7 +164,6 @@ const statements = {
       "SELECT * FROM users WHERE mute_until > strftime('%s', 'now') ORDER BY mute_until DESC"
     ),
 
-  // Cooldowns
   getCooldown: (userId, command) =>
     dbGet('SELECT expires_at FROM cooldowns WHERE user_id = ? AND command = ?', [
       userId,
@@ -174,7 +179,6 @@ const statements = {
   clearExpiredCooldowns: () =>
     dbRun("DELETE FROM cooldowns WHERE expires_at < strftime('%s', 'now')"),
 
-  // Stock logs
   addStockLog: (userId, username, service, email, status) =>
     dbRun(
       'INSERT INTO stock_logs (user_id, username, service, email, status) VALUES (?, ?, ?, ?, ?)',
@@ -196,7 +200,6 @@ const statements = {
   getRecentStockLogs: () =>
     dbAll('SELECT * FROM stock_logs ORDER BY created_at DESC LIMIT 50'),
 
-  // Command logs
   addCommandLog: (userId, username, command, guildId, channelId) =>
     dbRun(
       'INSERT INTO command_logs (user_id, username, command, guild_id, channel_id) VALUES (?, ?, ?, ?, ?)',

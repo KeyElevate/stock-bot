@@ -1,0 +1,86 @@
+CHANGELOG
+=========
+
+v2.1.0 — Termux Compatibility & Cross-Platform Release
+-------------------------------------------------------
+
+### Database Migration (Breaking)
+- **Replaced `better-sqlite3`** — removed entirely (required native compilation, failed on Termux/Android)
+- **Replaced `sqlite3`** — removed entirely (same native build issues on ARM64/Android)
+- **Migrated to `sql.js`** (`^1.14.1`) — pure WebAssembly SQLite, zero native modules
+  - Works on every platform: Ubuntu, Debian, VPS, Termux, Android ARM64, Windows
+  - Loads existing `.db` files on startup, persists to disk after every write
+  - `WAL` journal mode for concurrent access safety
+- Database API surface unchanged — all `statements.*()`, `ensureUser()`, `initializeDatabase()`,
+  `getStockLogsPaginated()`, `getCommandLogsPaginated()` exports remain identical
+- No command files needed modification — only `database/index.js` was rewritten
+
+### Multiple Owner ID Support
+- `.env.example`: `OWNER_ID` now supports comma-separated values
+  ```
+  OWNER_ID=id1,id2,id3
+  ```
+- `utils/config.js`: `ownerId` → `ownerIds[]` array (split, trimmed, filtered)
+- All 10 command files updated:
+  - `config.discord.ownerId` → `config.discord.ownerIds.includes(id)`
+  - Both `!==` and `===` checks converted appropriately
+  - Single owner ID still works (array with one element)
+
+### One-Command Auto Installer (`install.sh`)
+- Complete rewrite of `install.sh` with:
+  - **Colored output** via `printf` (no `echo -e` — portable across shells)
+  - **Checkmark indicators** (`✓` / `✗` / `→`)
+  - **Interactive `.env` wizard** — prompts for token, client ID, owner IDs, dashboard settings
+  - **Auto-generates `DASHBOARD_SECRET`** via `crypto.randomBytes(32)` if left empty
+  - **Validates required fields** — loops until non-empty input
+- **Node.js 20 enforcement**:
+  - Detects installed Node.js version
+  - If NOT v20.x (e.g. v24, v18), auto-installs Node.js 20 via `nvm`
+  - Sets as default alias: `nvm alias default 20`
+- **Clean install handling**:
+  - `rm -rf node_modules package-lock.json` before each install
+  - Applied to both main bot and dashboard/web
+- **Production mode**: `npm install --omit=dev` for main bot dependencies
+- **No nested re-download**: Checks for `package.json` + `index.js` before cloning
+- Supports: Ubuntu, Debian, Termux, ARM64
+
+### Dashboard API — Async Migration
+- `dashboard/routes/api.js`: All route handlers wrapped with async error handler
+- All sync `statements.xxx.all()`, `.get()`, `.run()` calls converted to `await statements.xxx()`
+- Added `asyncHandler` wrapper for Express route error propagation
+
+### `package.json` Changes
+- `sql.js ^1.14.1` added (replaces `sqlite3 ^5.1.7`)
+- `concurrently ^9.1.2` moved from devDependencies to dependencies (always installed)
+- `engines.node` set to `"20.x"` (strict Node.js 20 requirement)
+- `devDependencies` cleaned up (empty object)
+
+### Event Handlers Updated
+- `events/ready.js`: `statements.clearExpiredCooldowns()` now awaited
+- `events/interactionCreate.js`: `ensureUser()` and `addCommandLog()` now awaited
+
+### Command Files Updated
+All 13 command files updated for async database API:
+- Removed `.get()`, `.all()`, `.run()` accessor patterns
+- Added `await` to all database calls
+- Fixed config paths: `../../config` → `../../utils/config`
+- Updated owner permission checks to use `config.discord.ownerIds.includes()`
+
+### Configuration Fixes
+- `.env.example`: Updated to show comma-separated `OWNER_ID` format
+- `DASHBOARD_PORT=3000` wired through `utils/config.js` → `dashboard/server.js`
+
+### README.md Rewrite
+- Clone URL: `<repository-url>` → `https://github.com/KeyElevate/stock-bot`
+- One-command install section at top: `bash <(curl -fsSL ...)`
+- Manual installation simplified with merged steps
+- `start:all` script documented (bot + dashboard together)
+- Troubleshooting updated: `sql.js` section, Node.js 20 requirement
+- Removed all `better-sqlite3` references
+
+### React Dashboard
+- Full SPA with Vite, TailwindCSS, Framer Motion, Recharts
+- Animated components, dark/light mode, login auth
+- Pages: Dashboard, Stock, Services, Users, Logs, Settings
+
+---
